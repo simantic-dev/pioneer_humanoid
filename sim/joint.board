@@ -1,0 +1,6 @@
+# Sim addition. Scripted CAN master on a free sysbus slot; the scenario puts it on the same bus as
+# the joint's fdcan2 (PB12/PB13). HSE stays at the NUCLEO-G474RE's 24 MHz: see README, "Clock".
+canpeer: CAN.ScriptedCanNode @ sysbus 0x50100000
+    file: "sim/peers/can_peer.py"
+rcc:
+    hseFrequency: 24000000

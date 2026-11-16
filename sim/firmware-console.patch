@@ -1,0 +1,78 @@
+--- firmware.c.orig
++++ app/src/firmware.c
+@@ -4,6 +4,7 @@
+ #include "FreeRTOS.h"
+ #include "stm32g4xx.h"
+ #include "task.h"
++#include <string.h>
+ 
+ #define BOOTLOADER_SIZE (0x08008000U)
+ 
+@@ -12,12 +13,60 @@
+   SCB->VTOR = BOOTLOADER_SIZE;
+ }
+ 
++// --- sim fixture additions: console on LPUART1 (PA2/PA3, the Nucleo VCP) ---
++static UART_HandleTypeDef console;
++
++static void console_init(void) {
++  __HAL_RCC_GPIOA_CLK_ENABLE();
++  __HAL_RCC_LPUART1_CLK_ENABLE();
++  GPIO_InitTypeDef g = {0};
++  g.Pin = GPIO_PIN_2 | GPIO_PIN_3;
++  g.Mode = GPIO_MODE_AF_PP;
++  g.Speed = GPIO_SPEED_FREQ_LOW;
++  g.Alternate = GPIO_AF12_LPUART1;
++  HAL_GPIO_Init(GPIOA, &g);
++  console.Instance = LPUART1;
++  console.Init.BaudRate = 115200;
++  console.Init.WordLength = UART_WORDLENGTH_8B;
++  console.Init.StopBits = UART_STOPBITS_1;
++  console.Init.Parity = UART_PARITY_NONE;
++  console.Init.Mode = UART_MODE_TX;
++  console.Init.HwFlowCtl = UART_HWCONTROL_NONE;
++  console.Init.OverSampling = UART_OVERSAMPLING_16;
++  console.Init.ClockPrescaler = UART_PRESCALER_DIV1;
++  console.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
++  HAL_UART_Init(&console);
++}
++
++static void print(const char* s) {
++  HAL_UART_Transmit(&console, (const uint8_t*)s, strlen(s), 100);
++}
++
++static void print_num(const char* label, uint32_t v) {
++  char buf[12];
++  int i = sizeof buf - 1;
++  buf[i] = 0;
++  do { buf[--i] = '0' + v % 10; v /= 10; } while (v);
++  print(label);
++  print(buf + i);
++  print("\n");
++}
++// --- end fixture additions ---
++
+ // thread for blinking led
+ void blink_led(void* pvParams) {
++  uint32_t toggles = 0;
++  console_init();
++  print("PIONEER: app up\n");
++  print_num("SYSCLK: ", SystemCoreClock);
+   while (1) {
+     HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+     // vTaskDelay(pdMS_TO_TICKS(500));
+     HAL_Delay(500);
++    if (++toggles % 2 == 0) {
++      print_num("tick ", toggles / 2);
++      if (toggles == 8) print("RESULT: PASS\n");
++    }
+   }
+ }
+ 
+@@ -44,4 +93,4 @@
+ 
+   while (1)
+     ;
+-}
+\ No newline at end of file
++}
