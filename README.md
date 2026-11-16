@@ -82,13 +82,21 @@ flowchart LR
 The joint image is `firmware.elf` from `pio run -e nucleo_g474re` (sha256 prefix 1097640619bb639a; a second
 build gave the same hash).
 
-**Clock** (a factual observation about `app/src/system.c`, from the boot image run). `SystemClock_Config`
-asks for HSI as the PLL source with `PLLM = 16`, `PLLN = 336`, `PLLP = DIV4`, `PLLQ = 7`, and never assigns
-`PLLR`. The simulator's RCC log for that image reads `PLLM=16 PLLN=80` with a VCO of 80 MHz, below the
-96 MHz minimum it quotes from RM0440, and the app prints `SYSCLK: 13333333`, 13.33 MHz. The values in the
-source are the ones the STM32F4 HAL takes; I did not check the G4 field width against the manual in this
-run, and `unverified` what the same code does on silicon. HAL, SysTick and `HAL_Delay` agree with the 13.33 MHz
-figure (ticks land 1.002 s apart), so the app is self-consistent at that clock.
+**Clock** (from `app/src/system.c`, source reading plus the boot image run; the boot image was not rebuilt).
+`SystemClock_Config` uses STM32F4 PLL values on a G4: HSI source, `PLLM = 16`, `PLLN = 336`, `PLLP = DIV4`,
+`PLLQ = 7`, and `RCC_OscInitTypeDef` is not zero-initialised, so `PLLR` is whatever was on the stack. On the
+STM32G4, PLLN is a 7-bit field (RM0440 section 7.4.4, bits 14:8, legal 8 to 127; HAL's `IS_RCC_PLLN_VALUE` is
+also 8 to 127), so `336 << 8` leaves PLLN = 0x50 = 80 and spills into bit 16 (PLLPEN). With `PLLM = 16` on HSI16
+the VCO input is 1 MHz (datasheet range 2.66 to 16 MHz) and the VCO is 80 MHz (datasheet minimum 96 MHz): out
+of spec. The simulator masks PLLN to 7 bits, warns, and still sets PLLRDY, because a silicon measurement
+(NUCLEO-G474RE rev X) locked at 1 MHz / 80 MHz. The app prints `SYSCLK: 13333333`; a PLLR field of 6 would give
+80 / 6 = 13.33 MHz, but that PLLR is 6 in this image is `unverified`. HAL, SysTick and `HAL_Delay` agree with
+13.33 MHz (ticks land 1.002 s apart). This is a firmware configuration issue rather than a simulator model
+issue. A legal example is HSI16 / 4 x 85 / 2 = 170 MHz.
+
+**Corrected (2026-11-16).** An earlier version of this section said the G4 field width was not checked and
+framed 13.33 MHz against a 16 MHz expectation as a model question. The field width is now checked against
+RM0440, and the 13.33 MHz figure follows from the source configuration.
 For the joint image the `HSE_VALUE=4800000U` build flag differs from the NUCLEO's 24 MHz crystal, so
 the first scenario declares 24 MHz. `millis()` then runs about 5x fast, consistent with that mismatch: the
 0x123 frames come every 20.2 ms of virtual time instead of every 100 ms. The CAN check is therefore a speed ratio (1.45 to 1.75 accepted by
