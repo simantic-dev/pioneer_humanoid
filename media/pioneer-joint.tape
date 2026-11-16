@@ -6,12 +6,12 @@ Set Height 740
 Set Padding 18
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 35ms
-Set PlaybackSpeed 2.5
+Set PlaybackSpeed 6
 Env PS1 "$ "
 Hide
 Type 'cd "$(git rev-parse --show-toplevel)" && export PATH="$HOME/.local/bin:$PATH" && clear' Enter
 Sleep 1s
 Show
 Type "./demo" Enter
-Wait+Screen@240s /done: commanded/
+Wait+Screen@400s /joint (tracked|did NOT track)/
 Sleep 4s

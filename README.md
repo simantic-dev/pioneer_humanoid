@@ -1,7 +1,7 @@
 ## Demo: the joint firmware in simulation
 
 ```sh
-./demo          # after ./demo build (PlatformIO, once); about 30 s
+./demo          # after ./demo build (PlatformIO, once)
 ```
 
 ![joint firmware demo](media/pioneer-joint.gif)
@@ -23,12 +23,32 @@ flowchart LR
 
 The joint-board firmware from `src/embedded/STM32` runs unmodified on a simulated STM32G474RET6: its SimpleFOC
 alignment, the MT6835 encoder read over SPI, and its CAN status frames. The motor is a Python PMSM stand-in, not a
-CubeMars model, and the CAN master sends this firmware's own ASCII target on 0x123, not the MIT protocol in
-`src/interfacing`. The peers work at transaction level (SPI bytes, CAN frames) with no electrical effects. Known
-gaps: the velocity loop does not settle at the 8.00 rad/s target in this model (the shaft runs near 25 rad/s before
-the command and 40 rad/s after), the firmware reports `No current sense`, and the peer's "followed" check is a
-speed ratio, not tracking accuracy. Prerequisites: `sim` 0.10.0 (`curl -fsSL https://simantic.com/install | sh`) and
-PlatformIO for `./demo build`.
+CubeMars model, and the CAN master sends this firmware's own ASCII target on 0x123 (`"32"` = 25 x 32/100 = 8.00 rad/s),
+not the MIT protocol in `src/interfacing`. The peers work at transaction level (SPI bytes, CAN frames) with no electrical
+effects.
+
+The firmware's control is open loop (`motor.controller = velocity_openloop`, `main.cpp`): there is no speed feedback. The
+CAN target sets the rate of a rotating field at a fixed 3 V, and the rotor follows it. The peer checks that the speed the
+firmware is commanding, measured in the firmware's own time base, settles within 10% of each setpoint. The run steps
+5 rad/s (boot default), 8 rad/s (`"32"`), then 4 rad/s (`"16"`).
+
+Known gaps:
+- **Time base.** The firmware's clock runs about 5x slow against the simulator's virtual time: its 100 ms status frames
+  arrive every 20.2 ms of virtual time, so one firmware second is 0.202 virtual seconds. This is consistent with
+  `HSE_VALUE=4800000U` in `platformio.ini` against the scenario's 24 MHz crystal, but the board's real crystal is not
+  verified. The peer converts virtual speed to firmware rad/s using the frame spacing, which is a shortcut, not a
+  firmware read-back. If the mismatch is real on hardware, commands run at a different rate than the code intends, so
+  check this before any powered test.
+- **No closed loop.** Nothing in the simulation loads the rotor, so the open-loop field is never tested under load.
+- The firmware reports `ERR-MOT:No current sense.`, and the plant has no current sensing either.
+- The CAN protocol is not the DBC and not the CubeMars protocol. No CubeMars motor is simulated.
+- The plant's d-axis current (about 14 A at 40 rad/s virtual) is resistance-dominated in the stand-in. It was not
+  investigated against the electrical angle, and the check does not use it.
+- The plant, the encoder's status bits (always 0) and the 0.6 electrical radian start offset are stand-ins chosen for
+  the run; the peers mark them `MODELED SIMPLIFICATION`.
+- Not run: the ESP32-S3 sources, the Python and ROS modules, silicon.
+
+Prerequisites: `sim` 0.10.0 (`curl -fsSL https://simantic.com/install | sh`) and PlatformIO for `./demo build`.
 
 ## This fork: the Pioneer joint board in a simulator
 
@@ -39,7 +59,7 @@ the committed firmware sources are unchanged (the build-time changes are listed 
 offered back or posted upstream. If you are on the team and want this removed, say so and it goes.
 
 ```
-joint firmware's own USB console, 3.5 s of virtual time (sim/run.sh)
+joint firmware's own USB console, 5.2 s of virtual time (sim/run.sh, excerpt)
   [0.301367s] MOT:Align sensor.
   [0.742186s] MOT:sensor dir: CW
   [0.742206s] MOT:PP check: OK!
@@ -47,16 +67,18 @@ joint firmware's own USB console, 3.5 s of virtual time (sim/run.sh)
   [0.926203s] ERR-MOT:No current sense.
   [1.126208s] Motor ready!!!
   [3.499977s] 64.49            <- encoder.getAngle(), rad
-CAN master                      shaft 25.0 rad/s before command, 101 status frames
-                                sent target '32' on 0x123
-                                shaft 39.7 rad/s after command, ratio 1.59, 115 status frames
+CAN master  0x123 "32" -> commanded 8.00 rad/s (25 x 32/100)
+peer: boot default   5.00 rad/s -> firmware measures 5.05 rad/s (settled in 0.00 s)
+peer: commanded 8.00 rad/s -> firmware measures 8.08 rad/s (settled in 0.08 s)
+peer: commanded 4.00 rad/s -> firmware measures 4.04 rad/s (settled in 0.11 s)
+peer: joint tracked the CAN command: all setpoints within 10% (firmware time)
 ```
 
 ![Encoder angle and shaft speed](sim/screenshots/encoder-and-speed.png)
 
 Top: the angle the firmware prints from its MT6835 reads (26,279 prints, 64.49 rad at the end). Bottom:
 the PMSM stand-in's shaft speed. It settles at 25.0 rad/s, then steps to about 40 rad/s after the master's
-command frame at 3.150 s (dashed). Configuration `sim/scenario.yaml`, 3.5 s virtual, Simantic `sim` 0.10.0
+command frame at 3.150 s (dashed). Configuration `sim/scenario.yaml`, 3.5 s virtual (an earlier run; the current check uses 5.2 s), Simantic `sim` 0.10.0
 (build f219eb31), 2026-11-16; angle from the run's USB console log, speed from the plant peer's own log.
 
 ![CAN 0x123 status interval](sim/screenshots/can-0x123.png)
@@ -107,7 +129,7 @@ flowchart LR
 
 | Configuration | Where | Virtual | Wall | Result |
 | --- | --- | --- | --- | --- |
-| Joint, HSE 24 MHz (the NUCLEO crystal) | `sim/scenario.yaml`, `sim/run.sh` | 3.5 s | 22 to 26 s | runs: alignment passes (`sensor dir: CW`, `PP check: OK!`), `Motor ready!!!` at 1.126 s, 118 status frames, shaft follows the CAN command (ratio 1.59) |
+| Joint, HSE 24 MHz (the NUCLEO crystal) | `sim/scenario.yaml`, `sim/run.sh` | 5.2 s | about 2 min on a loaded laptop | runs: alignment passes (`sensor dir: CW`, `PP check: OK!`), `Motor ready!!!` at 1.126 s, setpoints 5, 8 and 4 rad/s firmware time all within 10% |
 | Joint, HSE 4.8 MHz (the `HSE_VALUE` in their `platformio.ini`) | `sim/scenario-hse4p8.yaml` | 3.5 s | 2.8 s | does not run: the USB console prints nothing, no CAN status frame is sent, the shaft stays at 0.0 rad/s |
 | Bootloader + FreeRTOS app, console patch | `sim/build-boot.sh`, `sim/run-boot.sh` | 5 s | 0.9 s | runs: `PIONEER: app up` at 1.37 ms, ticks 1.006 s apart, `RESULT: PASS` at 4.013 s |
 
@@ -131,8 +153,8 @@ framed 13.33 MHz against a 16 MHz expectation as a model question. The field wid
 RM0440, and the 13.33 MHz figure follows from the source configuration.
 For the joint image the `HSE_VALUE=4800000U` build flag differs from the NUCLEO's 24 MHz crystal, so
 the first scenario declares 24 MHz. `millis()` then runs about 5x fast, consistent with that mismatch: the
-0x123 frames come every 20.2 ms of virtual time instead of every 100 ms. The CAN check is therefore a speed ratio (1.45 to 1.75 accepted by
-the peer).
+0x123 frames come every 20.2 ms of virtual time instead of every 100 ms. The CAN check converts the shaft's virtual-time speed to firmware time with that spacing and checks each setpoint
+within 10%.
 
 **Gaps, with the evidence:**
 - **The joint does not run at 4.8 MHz HSE in the simulator** (`sim/scenario-hse4p8.yaml`). The log shows
