@@ -1,16 +1,17 @@
 Output media/pioneer-joint.gif
 Set Shell zsh
-Set FontSize 15
+Set FontSize 16
 Set Width 1280
 Set Height 740
 Set Padding 18
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 35ms
+Set PlaybackSpeed 2.5
 Env PS1 "$ "
 Hide
-Type 'cd "$(git rev-parse --show-toplevel)" && clear' Enter
+Type 'cd "$(git rev-parse --show-toplevel)" && export PATH="$HOME/.local/bin:$PATH" && clear' Enter
+Sleep 1s
 Show
-Type "sim run --scenario sim/scenario.yaml --usb-cdc-console dut.usb --timeout 3.5 --ascii 2>&1 \" Enter
-Type "    | grep --line-buffered -E 'MOT:(sensor|PP)|Motor ready|canpeer'" Enter
-Wait+Screen@180s /joint followed CAN command/
-Sleep 3s
+Type "./demo" Enter
+Wait+Screen@240s /done: commanded/
+Sleep 4s

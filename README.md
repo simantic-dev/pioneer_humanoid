@@ -1,18 +1,34 @@
 ## Demo: the joint firmware in simulation
 
 ```sh
-git clone https://github.com/simantic-dev/pioneer_humanoid && cd pioneer_humanoid && sim/build.sh && ./demo
+./demo          # after ./demo build (PlatformIO, once); about 30 s
 ```
 
-You need `sim` 0.10.0 or newer and PlatformIO. `curl -fsSL https://simantic.com/install | sh` installs `sim`.
+![joint firmware demo](media/pioneer-joint.gif)
 
-![joint firmware in simulation](media/pioneer-joint.gif)
+```mermaid
+flowchart LR
+  fw["STM32G474RET6 joint firmware<br/>src/embedded/STM32, unmodified"]
+  plant["plant peer<br/>sim/peers/foc_plant.py + pmsm.py"]
+  enc["encoder peer<br/>sim/peers/mt6835_peer.py"]
+  can["CAN master peer<br/>sim/peers/can_peer.py"]
+  host["terminal (./demo)"]
+  fw -- "TIM4 3-phase PWM duty" --> plant
+  plant -- "shaft angle" --> enc
+  enc -- "SPI1 burst read: angle, status, CRC8" --> fw
+  can -- "CAN 0x123 target '32' (8.00 rad/s)" --> fw
+  fw -- "CAN 0x123 status '67890' every 100 ms" --> can
+  fw -- "USB CDC console: MOT:* lines, encoder angle" --> host
+```
 
-The joint-board firmware from `src/embedded/STM32` runs unmodified on a simulated STM32G474RET6: its
-SimpleFOC alignment, the MT6835 encoder read over SPI, and its CAN status frames. The motor is a Python
-plant (`sim/peers/foc_plant.py`) and the encoder and CAN master are Python peers too; they work at the
-transaction level (SPI bytes, CAN frames), not as electrical models. A Python CAN master sends a speed
-command on 0x123, and the simulated shaft follows it.
+The joint-board firmware from `src/embedded/STM32` runs unmodified on a simulated STM32G474RET6: its SimpleFOC
+alignment, the MT6835 encoder read over SPI, and its CAN status frames. The motor is a Python PMSM stand-in, not a
+CubeMars model, and the CAN master sends this firmware's own ASCII target on 0x123, not the MIT protocol in
+`src/interfacing`. The peers work at transaction level (SPI bytes, CAN frames) with no electrical effects. Known
+gaps: the velocity loop does not settle at the 8.00 rad/s target in this model (the shaft runs near 25 rad/s before
+the command and 40 rad/s after), the firmware reports `No current sense`, and the peer's "followed" check is a
+speed ratio, not tracking accuracy. Prerequisites: `sim` 0.10.0 (`curl -fsSL https://simantic.com/install | sh`) and
+PlatformIO for `./demo build`.
 
 ## This fork: the Pioneer joint board in a simulator
 
