@@ -1,3 +1,19 @@
+## Demo: the joint firmware in simulation
+
+```sh
+git clone https://github.com/simantic-dev/pioneer_humanoid && cd pioneer_humanoid && sim/build.sh && ./demo
+```
+
+You need `sim` 0.10.0 or newer and PlatformIO. `curl -fsSL https://simantic.com/install | sh` installs `sim`.
+
+![joint firmware in simulation](media/pioneer-joint.gif)
+
+The joint-board firmware from `src/embedded/STM32` runs unmodified on a simulated STM32G474RET6: its
+SimpleFOC alignment, the MT6835 encoder read over SPI, and its CAN status frames. The motor is a Python
+plant (`sim/peers/foc_plant.py`) and the encoder and CAN master are Python peers too; they work at the
+transaction level (SPI bytes, CAN frames), not as electrical models. A Python CAN master sends a speed
+command on 0x123, and the simulated shaft follows it.
+
 ## This fork: the Pioneer joint board in a simulator
 
 This is Simantic's fork of WATonomous' Pioneer humanoid repository, kept as a simulation showcase. It runs
