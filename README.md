@@ -27,18 +27,13 @@ CubeMars model, and the CAN master sends this firmware's own ASCII target on 0x1
 not the MIT protocol in `src/interfacing`. The peers work at transaction level (SPI bytes, CAN frames) with no electrical
 effects.
 
-The firmware's control is open loop (`motor.controller = velocity_openloop`, `main.cpp`): there is no speed feedback. The
-CAN target sets the rate of a rotating field at a fixed 3 V, and the rotor follows it. The peer checks that the speed the
-firmware is commanding, measured in the firmware's own time base, settles within 10% of each setpoint. The run steps
+The firmware's control is open loop (`motor.controller = velocity_openloop`, `main.cpp`): there is no speed feedback. The CAN target sets the rate of a rotating field at a fixed 3 V, and the rotor follows it. The peer checks that the shaft's speed, in rad per virtual second, settles within 10% of each setpoint. The run steps
 5 rad/s (boot default), 8 rad/s (`"32"`), then 4 rad/s (`"16"`).
 
 Known gaps:
-- **Time base.** The firmware's clock runs about 5x slow against the simulator's virtual time: its 100 ms status frames
-  arrive every 20.2 ms of virtual time, so one firmware second is 0.202 virtual seconds. This is consistent with
-  `HSE_VALUE=4800000U` in `platformio.ini` against the scenario's 24 MHz crystal, but the board's real crystal is not
-  verified. The peer converts virtual speed to firmware rad/s using the frame spacing, which is a shortcut, not a
-  firmware read-back. If the mismatch is real on hardware, commands run at a different rate than the code intends, so
-  check this before any powered test.
+- **Time base.** The scenario sets the HSE to 4.8 MHz, the `HSE_VALUE=4800000U` in `platformio.ini`, so the board's
+  clock matches the firmware's build. On a board with a different crystal (e.g. a NUCLEO-G474RE's 24 MHz), the firmware's
+  timing scales by crystal / 4.8 MHz, so the board's HSE must match `HSE_VALUE`. The peer reports virtual-time speed with no rescaling.
 - **No closed loop.** Nothing in the simulation loads the rotor, so the open-loop field is never tested under load.
 - The firmware reports `ERR-MOT:No current sense.`, and the plant has no current sensing either.
 - The CAN protocol is not the DBC and not the CubeMars protocol. No CubeMars motor is simulated.
@@ -59,19 +54,13 @@ the committed firmware sources are unchanged (the build-time changes are listed 
 offered back or posted upstream. If you are on the team and want this removed, say so and it goes.
 
 ```
-joint firmware's own USB console, 5.2 s of virtual time (sim/run.sh, excerpt)
-  [0.301367s] MOT:Align sensor.
-  [0.742186s] MOT:sensor dir: CW
-  [0.742206s] MOT:PP check: OK!
-  [0.886186s] MOT:Zero elec. angle: 6.27
-  [0.926203s] ERR-MOT:No current sense.
-  [1.126208s] Motor ready!!!
-  [3.499977s] 64.49            <- encoder.getAngle(), rad
+./demo output with the HSE at 4.8 MHz, 5.2 s of virtual time (the firmware prints nothing, see "Clock")
 CAN master  0x123 "32" -> commanded 8.00 rad/s (25 x 32/100)
-peer: boot default   5.00 rad/s -> firmware measures 5.05 rad/s (settled in 0.00 s)
-peer: commanded 8.00 rad/s -> firmware measures 8.08 rad/s (settled in 0.08 s)
-peer: commanded 4.00 rad/s -> firmware measures 4.04 rad/s (settled in 0.11 s)
-peer: joint tracked the CAN command: all setpoints within 10% (firmware time)
+CAN master  0x123 "16" -> commanded 4.00 rad/s (25 x 16/100)
+peer: boot default   5.00 rad/s -> measures 0.00 rad/s virtual (did NOT settle)
+peer: commanded 8.00 rad/s -> measures 0.00 rad/s virtual (did NOT settle)
+peer: commanded 4.00 rad/s -> measures 0.00 rad/s virtual (did NOT settle)
+peer: joint did NOT track the CAN command
 ```
 
 ![Encoder angle and shaft speed](sim/screenshots/encoder-and-speed.png)
@@ -129,8 +118,8 @@ flowchart LR
 
 | Configuration | Where | Virtual | Wall | Result |
 | --- | --- | --- | --- | --- |
-| Joint, HSE 24 MHz (the NUCLEO crystal) | `sim/scenario.yaml`, `sim/run.sh` | 5.2 s | about 2 min on a loaded laptop | runs: alignment passes (`sensor dir: CW`, `PP check: OK!`), `Motor ready!!!` at 1.126 s, setpoints 5, 8 and 4 rad/s firmware time all within 10% |
-| Joint, HSE 4.8 MHz (the `HSE_VALUE` in their `platformio.ini`) | `sim/scenario-hse4p8.yaml` | 3.5 s | 2.8 s | does not run: the USB console prints nothing, no CAN status frame is sent, the shaft stays at 0.0 rad/s |
+| Joint, HSE 24 MHz (the NUCLEO crystal; not a file now, set `hseFrequency` in `sim/joint.board`) | earlier scenario, 5.2 s | about 2 min on a loaded laptop | runs: alignment passes, `Motor ready!!!` at 1.126 s; setpoints were checked against a frame-spacing scale, since removed, and not re-run |
+| Joint, HSE 4.8 MHz (the `HSE_VALUE` in their `platformio.ini`; the default) | `sim/scenario.yaml`, `sim/run.sh`, `./demo` | 5.2 s | 9 s | does not run: the USB console prints nothing, no CAN status frame is sent, the shaft stays at 0.0 rad/s |
 | Bootloader + FreeRTOS app, console patch | `sim/build-boot.sh`, `sim/run-boot.sh` | 5 s | 0.9 s | runs: `PIONEER: app up` at 1.37 ms, ticks 1.006 s apart, `RESULT: PASS` at 4.013 s |
 
 The joint image is `firmware.elf` from `pio run -e nucleo_g474re` (sha256 prefix 1097640619bb639a; a second
@@ -151,13 +140,12 @@ issue. A legal example is HSI16 / 4 x 85 / 2 = 170 MHz.
 **Corrected (2026-11-16).** An earlier version of this section said the G4 field width was not checked and
 framed 13.33 MHz against a 16 MHz expectation as a model question. The field width is now checked against
 RM0440, and the 13.33 MHz figure follows from the source configuration.
-For the joint image the `HSE_VALUE=4800000U` build flag differs from the NUCLEO's 24 MHz crystal, so
-the first scenario declares 24 MHz. `millis()` then runs about 5x fast, consistent with that mismatch: the
-0x123 frames come every 20.2 ms of virtual time instead of every 100 ms. The CAN check converts the shaft's virtual-time speed to firmware time with that spacing and checks each setpoint
-within 10%.
+For the joint image, `HSE_VALUE=4800000U` in `platformio.ini` is the crystal the firmware is built for, so the
+scenario declares 4.8 MHz. An earlier version declared the NUCLEO's 24 MHz, which made `millis()` run about 5x
+fast; the CAN check then rescaled speed by the frame spacing to hide that. The rescaling has been removed.
 
 **Gaps, with the evidence:**
-- **The joint does not run at 4.8 MHz HSE in the simulator** (`sim/scenario-hse4p8.yaml`). The log shows
+- **The joint does not run at 4.8 MHz HSE in the simulator** (the default scenario). The log shows
   the RCC computing a 57.6 MHz VCO; the console, which waits on USB (`while (!Serial)` in `main.cpp`), is
   silent. That USB is the blocker is read from the source, not isolated in a run: `unverified`.
 - **`ERR-MOT:No current sense.`** is printed by SimpleFOC at start-up: this firmware has no current sensing.
