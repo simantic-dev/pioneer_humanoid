@@ -1,5 +1,0 @@
-# Sim addition. Same as joint.board with the MuJoCo-arm CAN master.
-canpeer: CAN.ScriptedCanNode @ sysbus 0x50100000
-    file: "sim/peers/can_peer_arm.py"
-rcc:
-    hseFrequency: 24000000
