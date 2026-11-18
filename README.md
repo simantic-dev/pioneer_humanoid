@@ -52,7 +52,12 @@ MuJoCo the shaft torque, steps MuJoCo (`sim/mujoco/arm.xml`: a 0.3 m link, 0.12 
 returns the hinge angle through the MT6835 encoder peer. The firmware closes its own SimpleFOC angle loop on that encoder. A CAN
 master sends two target angles. The mechanics are MuJoCo's, not code of ours.
 
-![Playback of the captured run](sim/screenshots/arm-playback.gif)
+![The arm in MuJoCo's renderer next to the firmware's console](sim/screenshots/arm-mujoco.gif)
+
+Rendered through MuJoCo's own renderer from the captured run (`sim/mujoco/render_run.py`; MP4: `sim/screenshots/arm-mujoco.mp4`).
+Left, the arm and a green ghost at the angle the CAN master commanded; right, the hinge angle over virtual time; below, what the
+simulated STM32 printed and received. It plays at the run's own virtual time, one frame per 40 ms. A plain 2D playback of the same
+samples is `sim/screenshots/arm-playback.gif`.
 
 The GIF is a playback of the captured run's 10 ms samples (virtual time). The plot is the same run:
 
@@ -71,7 +76,8 @@ at 1.885 rad is 0.31 N*m, MuJoCo's own m g d sin(q) for this arm is 0.306 N*m. T
   sets `HSE_VALUE=24000000U`, the NUCLEO crystal this scenario declares, so `millis()` is right (the default scenario's 5x-fast clock is
   described under "Clock" below). Ten gain settings were tried; the earlier ones rang, this is the one reported.
 - The motor's R, L, flux linkage and pole pairs are stand-ins (the repository does not name the motor), and the joint damping
-  (0.01 N*m*s/rad) is an assumed value: `MODELED SIMPLIFICATION`. Switching is averaged and torque and speed are exchanged once per 40 us.
+  (0.01 N*m*s/rad) is an assumed value: `MODELED SIMPLIFICATION`. The arm is also sized to the stand-in motor: a first
+  version with a 0.5 kg tip mass needed 1.5 N*m to hold against gravity, more than the stand-in's 0.63 N*m, so the tip mass is 0.1 kg. Switching is averaged and torque and speed are exchanged once per 40 us.
 - During alignment the firmware reports `PP check: fail - est. pp: 7.88` (the arm is gravity-loaded and swings; the motor has 7).
   SimpleFOC continues. This was not investigated further.
 

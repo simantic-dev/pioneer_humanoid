@@ -4,11 +4,23 @@
      actuator, gear 1), so data.ctrl[0] is the joint torque in N*m. -->
 <mujoco model="pioneer_arm">
   <option timestep="0.00004" gravity="0 0 -9.81" integrator="implicitfast"/>
+  <visual><headlight ambient="0.55 0.55 0.55" diffuse="0.7 0.7 0.7" specular="0 0 0"/><global offwidth="960" offheight="720"/></visual>
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.35 0.45 0.6" rgb2="0.05 0.07 0.1" width="32" height="512"/>
+  </asset>
   <worldbody>
+    <light pos="0.5 1 0.5" dir="-0.3 -1 -0.5"/>
+    <camera name="side" pos="0 0.75 -0.14" xyaxes="-1 0 0 0 0 1"/>
+    <!-- visuals only (contype 0): the mount, and a translucent ghost arm posed at the commanded angle by the renderer -->
+    <geom name="mount" type="box" pos="0 -0.03 0" size="0.06 0.015 0.06" rgba="0.5 0.5 0.55 1" contype="0" conaffinity="0"/>
+    <body name="ghost" pos="0 0 0">
+      <geom type="capsule" fromto="0 0 0 0 0 -0.3" size="0.008" rgba="0.2 0.9 0.3 0.35" contype="0" conaffinity="0" mass="0"/>
+      <geom type="sphere" pos="0 0 -0.3" size="0.011" rgba="0.2 0.95 0.3 0.6" contype="0" conaffinity="0" mass="0"/>
+    </body>
     <body name="link" pos="0 0 0">
       <joint name="hinge" type="hinge" axis="0 1 0" damping="0.01" armature="2e-4"/>
-      <geom type="capsule" fromto="0 0 0 0 0 -0.3" size="0.01" mass="0.02"/>
-      <geom type="sphere" pos="0 0 -0.3" size="0.02" mass="0.1"/>
+      <geom type="capsule" fromto="0 0 0 0 0 -0.3" size="0.01" mass="0.02" rgba="0.85 0.85 0.9 1"/>
+      <geom type="sphere" pos="0 0 -0.3" size="0.02" mass="0.1" rgba="0.95 0.45 0.15 1"/>
     </body>
   </worldbody>
   <actuator>

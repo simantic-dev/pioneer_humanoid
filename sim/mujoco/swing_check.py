@@ -5,8 +5,9 @@ m = mujoco.MjModel.from_xml_path(os.path.join(os.path.dirname(__file__), "arm.xm
 d = mujoco.MjData(m)
 d.qpos[0] = 0.1
 mujoco.mj_forward(m, d)
-mass = m.body_subtreemass[1]
-com = d.subtree_com[1]
+b = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "link")
+mass = m.body_subtreemass[b]
+com = d.subtree_com[b]
 dist = abs(com[2])
 M = np.zeros((1, 1))
 mujoco.mj_fullM(m, d, M)
