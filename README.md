@@ -44,6 +44,37 @@ The plant's dq currents and the TIM4 CH1 duty the firmware writes, over the alig
 the open-loop run. These currents are the stand-in's state, not a firmware measurement: the firmware
 reports `ERR-MOT:No current sense.` and has none. Same configuration and sim build.
 
+### The joint firmware on a MuJoCo arm (lockstep with an outside physics simulator)
+
+The same joint firmware drives a hinge in [MuJoCo](https://mujoco.org), stepped in lockstep with the simulated MCU. Every 40 us of
+virtual time `sim/peers/arm_plant.py` reads the PWM duty the firmware has written to TIM4, integrates the motor's dq currents, gives
+MuJoCo the shaft torque, steps MuJoCo (`sim/mujoco/arm.xml`: a 0.3 m link, 0.12 kg total, gravity on, rotor armature 2e-4) by the same 40 us and
+returns the hinge angle through the MT6835 encoder peer. The firmware closes its own SimpleFOC angle loop on that encoder. A CAN
+master sends two target angles. The mechanics are MuJoCo's, not code of ours.
+
+![Playback of the captured run](sim/screenshots/arm-playback.gif)
+
+The GIF is a playback of the captured run's 10 ms samples (virtual time). The plot is the same run:
+
+![Step response](sim/screenshots/arm-step.png)
+
+Measured with `sim` 0.10.4 (build cd27ee45), MuJoCo 4.0.1, 2026-11-18, `sim/run-arm.sh` (11 s virtual): after the firmware's
+sensor alignment (0.9 s to 5.0 s, `Motor ready!!!` at 5.036 s) the CAN master steps the target to 0.942 rad at 6.0 s and 1.885 rad at 8.5 s.
+Peak 0.938 rad (-0.5%) and 1.896 rad (+0.6%); mean error over the last 0.5 s of each hold -0.0074 and +0.0011 rad. The holding torque
+at 1.885 rad is 0.31 N*m, MuJoCo's own m g d sin(q) for this arm is 0.306 N*m. Two runs gave byte-identical logs.
+
+**How to run it:** `ARM=1 sh sim/build.sh`, then `VENV=<venv with mujoco numpy matplotlib> sh sim/run-arm.sh`. The default build is unchanged.
+
+**What it changes and what is still ours:**
+- `sim/arm-position.patch` (applied by `ARM=1` only) switches the firmware from `velocity_openloop` to `MotionControlType::angle`
+  (P_angle 6, velocity PI 1.0 and 2), reads the two CAN digits as an angle of NN/100 pi rad and starts the target at 0. The ARM build also
+  sets `HSE_VALUE=24000000U`, the NUCLEO crystal this scenario declares, so `millis()` is right (the default scenario's 5x-fast clock is
+  described under "Clock" below). Ten gain settings were tried; the earlier ones rang, this is the one reported.
+- The motor's R, L, flux linkage and pole pairs are stand-ins (the repository does not name the motor), and the joint damping
+  (0.01 N*m*s/rad) is an assumed value: `MODELED SIMPLIFICATION`. Switching is averaged and torque and speed are exchanged once per 40 us.
+- During alignment the firmware reports `PP check: fail - est. pp: 7.88` (the arm is gravity-loaded and swings; the motor has 7).
+  SimpleFOC continues. This was not investigated further.
+
 **What runs:**
 
 | Part | In the simulation |

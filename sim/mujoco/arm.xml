@@ -1,0 +1,17 @@
+<!-- MODELED SIMPLIFICATION: damping 0.01 N*m*s/rad (bearing + viscous) is an assumed value, not a measurement.
+     One revolute joint driving a 0.3 m link with a 0.5 kg tip mass, gravity on, the hinge axis
+     horizontal. Inertia comes from MuJoCo's own geometry; the joint is torque-driven (motor
+     actuator, gear 1), so data.ctrl[0] is the joint torque in N*m. -->
+<mujoco model="pioneer_arm">
+  <option timestep="0.00004" gravity="0 0 -9.81" integrator="implicitfast"/>
+  <worldbody>
+    <body name="link" pos="0 0 0">
+      <joint name="hinge" type="hinge" axis="0 1 0" damping="0.01" armature="2e-4"/>
+      <geom type="capsule" fromto="0 0 0 0 0 -0.3" size="0.01" mass="0.02"/>
+      <geom type="sphere" pos="0 0 -0.3" size="0.02" mass="0.1"/>
+    </body>
+  </worldbody>
+  <actuator>
+    <motor joint="hinge" gear="1" ctrllimited="true" ctrlrange="-1 1"/>
+  </actuator>
+</mujoco>
