@@ -1,3 +1,41 @@
+## How it works: the firmware, a simulated STM32 and MuJoCo in lockstep
+
+Everything below runs in one `sim` process on one virtual clock. Nothing is paced by the wall clock, and the same run gives
+byte-identical logs under different machine load. MuJoCo is a library the plant peer calls, not a second program, so it
+cannot get ahead of or behind the firmware.
+
+![Block diagram: the firmware on the simulated STM32, the plant peer and MuJoCo in lockstep](sim/screenshots/lockstep-diagram.png)
+
+Drawn by `sim/mujoco/diagram.py`.
+The parts are the scenario `sim graph --scenario sim/scenario-arm.yaml` prints (the STM32, the plant at `0xA0000400`, the encoder on SPI1,
+the CAN master on FDCAN2); the arrows are the data flow of `sim/peers/arm_plant.py`.
+
+**One 40 us tick (`sim/peers/arm_plant.py`), in virtual time:**
+1. Read the PWM duty the firmware has written: `CCR1/2/4` divided by `ARR`, straight from the simulated TIM4 registers.
+2. Turn the duty into phase voltages and integrate the motor's dq currents in ten 4 us sub-steps, using the shaft speed MuJoCo reported at the start of the tick. The mean shaft torque is `1.5 * p * psi * iq`.
+3. Set `data.ctrl[0]` to that torque and call `mj_step`, which advances MuJoCo's arm by the same 40 us.
+4. Publish MuJoCo's hinge angle and speed in `pmsm.MOTOR`.
+
+Between ticks the firmware runs on its own timing. When it reads the encoder over SPI, `mt6835_peer.py` answers with the angle published at the
+last tick, so the firmware sees a value 0 to 40 us old. When the CAN master sends a target (6.0 s and 8.5 s), the firmware's loop
+picks it up on its next 100 ms poll.
+
+| Part | Whose it is |
+| --- | --- |
+| Firmware (SimpleFOC loop, MT6835 driver, CAN handler) | the team's code; the ARM build only changes the control mode, the gains, what the CAN digits mean and the HSE value (`sim/arm-position.patch`) |
+| STM32G474 timers, SPI, FDCAN, clock | modelled by the simulator |
+| Arm: gravity, inertia, joint damping, rotor armature | MuJoCo, from `sim/mujoco/arm.xml` |
+| Motor R, L, flux linkage, pole pairs; averaged switching | ours, stand-ins (the repository does not name the motor) |
+| Encoder | ours: reports MuJoCo's angle exactly, 21-bit, status always 0 |
+| Joint damping 0.01 N*m*s/rad; the 0.1 kg tip mass | our choices, sized so the stand-in motor can hold the arm |
+
+**What this run does not test.** The mechanism is one revolute joint carrying one link and a point-like mass: there is no kinematic chain,
+no inverse kinematics, no coupling between joints, no contact and no changing payload. The gravity torque on the hinge is simply
+`m g d sin(q)`, which the log reproduces (0.31 N*m at 1.885 rad against 0.306 N*m). The encoder has no noise and no
+mechanical lag, the motor has no friction, cogging or backlash, and there is no gearbox. The controller gains were chosen from ten
+settings tried on this same plant. Treat the result as evidence that the firmware's control code, the timer, SPI and CAN
+models and MuJoCo exchange data correctly in lockstep, and not as a statement about a real arm.
+
 ## This fork: the Pioneer joint board in a simulator
 
 This is Simantic's fork of WATonomous' Pioneer humanoid repository, kept as a simulation showcase. It runs
