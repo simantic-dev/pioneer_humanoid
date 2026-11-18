@@ -12,7 +12,7 @@ import os
 
 import mujoco
 
-from pmsm import MOTOR
+from pmsm import HIST, MOTOR, READS
 
 R, L, PSI, P = 0.2, 1e-4, 0.004, 7
 VBUS = 12.0
@@ -20,7 +20,8 @@ TIM4 = 0x40000800
 ARR, CCR1, CCR2, CCR4 = 0x2C, 0x34, 0x38, 0x40
 STEP_US, SUB = 40, 10
 SAMPLE_EVERY = 250  # 10 ms
-MODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mujoco", "arm.xml")
+MODEL = os.environ.get("ARM_XML") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mujoco", "arm.xml")
+ENC_SIDE = os.environ.get("ARM_ENC", "rotor")  # which joint the encoder is mounted on: the motor's rotor or the load
 
 
 class Peripheral:
@@ -31,7 +32,12 @@ class Peripheral:
         self.m = mujoco.MjModel.from_xml_path(MODEL)
         self.d = mujoco.MjData(self.m)
         assert abs(self.m.opt.timestep - STEP_US * 1e-6) < 1e-12, "arm.xml timestep must equal STEP_US"
-        MOTOR.theta_m, MOTOR.wm = float(self.d.qpos[0]), 0.0
+        # one hinge (arm.xml), or a rotor and a load joint joined through a backlash gap (arm_xml.py)
+        jr = "rotor_j" if mujoco.mj_name2id(self.m, mujoco.mjtObj.mjOBJ_JOINT, "rotor_j") >= 0 else "hinge"
+        jl = "load_j" if jr == "rotor_j" else "hinge"
+        self.ir, self.il = int(self.m.joint(jr).qposadr[0]), int(self.m.joint(jl).qposadr[0])
+        self.ie = self.il if ENC_SIDE == "load" else self.ir
+        MOTOR.theta_m, MOTOR.wm = float(self.d.qpos[self.ie]), 0.0
         ctx.info(f"ARM MuJoCo {mujoco.__version__}, {os.path.basename(MODEL)}, step {STEP_US} us")
         ctx.schedule_periodic(STEP_US)
 
@@ -47,7 +53,7 @@ class Peripheral:
         mean = sum(duty) / 3
         vph = [VBUS * (d - mean) for d in duty]
         dt = STEP_US * 1e-6 / SUB
-        wm, th_m, torque = float(self.d.qvel[0]), float(self.d.qpos[0]), 0.0
+        wm, th_m, torque = float(self.d.qvel[self.ir]), float(self.d.qpos[self.ir]), 0.0
         for _ in range(SUB):
             th = P * th_m
             c = [math.cos(th - k * 2 * math.pi / 3) for k in range(3)]
@@ -61,7 +67,8 @@ class Peripheral:
             th_m += wm * dt
         self.d.ctrl[0] = torque
         mujoco.mj_step(self.m, self.d)
-        MOTOR.theta_m, MOTOR.wm = float(self.d.qpos[0]), float(self.d.qvel[0])
+        MOTOR.theta_m, MOTOR.wm = float(self.d.qpos[self.ie]), float(self.d.qvel[self.ir])
+        HIST.append(MOTOR.theta_m)
         self.n += 1
         if self.n % SAMPLE_EVERY == 0:
-            self.ctx.info(f"ARM t={self.n * STEP_US / 1e6:.4f} q={MOTOR.theta_m:.4f} qd={MOTOR.wm:.3f} tau={torque:.4f} iq={self.iq:.3f}")
+            self.ctx.info(f"ARM t={self.n * STEP_US / 1e6:.4f} q={self.d.qpos[self.il]:.4f} qd={self.d.qvel[self.il]:.3f} tau={torque:.4f} iq={self.iq:.3f} qr={self.d.qpos[self.ir]:.4f} er={READS[0]}")

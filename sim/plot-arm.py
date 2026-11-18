@@ -22,6 +22,7 @@ for (s0, nn), (s1, _) in zip(STEPS, STEPS[1:] + [(STEPS[-1][0] + 2_300_000, b"")
     tg = math.pi * int(nn) / 100
     win = [x - tg for tt, x in zip(t, q) if s1 / 1e6 - 0.5 <= tt <= s1 / 1e6]
     pk = max(q[i] for i in range(len(t)) if s0 / 1e6 <= t[i] <= s1 / 1e6)
-    print(f"step to {tg:.3f} rad: peak {pk:.3f} (overshoot {(pk - tg) / tg * 100:+.1f}%), last 0.5 s: mean error {sum(win)/len(win):+.4f}, max |error| {max(abs(w) for w in win):.4f} rad")
+    start = [q[i] for i in range(len(t)) if t[i] <= s0 / 1e6][-1]
+    print(f"step to {tg:.3f} rad: peak {pk:.3f} (overshoot {(pk - tg) / (tg - start) * 100:+.1f}% of the step), last 0.5 s: mean error {sum(win)/len(win):+.4f}, max |error| {max(abs(w) for w in win):.4f} rad")
     ok &= max(abs(w) for w in win) < 0.05
 print("SETTLED" if ok else "NOT SETTLED (max |error| over the last 0.5 s of a hold >= 0.05 rad)")

@@ -1,17 +1,20 @@
 diff --git a/src/embedded/STM32/src/main.cpp b/src/embedded/STM32/src/main.cpp
-index d36029d0..23480b22 100644
+index d36029d0..f5c644c9 100644
 --- a/src/embedded/STM32/src/main.cpp
 +++ b/src/embedded/STM32/src/main.cpp
-@@ -32,7 +32,7 @@ BLDCDriver3PWM driver = BLDCDriver3PWM(phaseA, phaseB, phaseC);
+@@ -32,7 +32,10 @@ BLDCDriver3PWM driver = BLDCDriver3PWM(phaseA, phaseB, phaseC);
  SPISettings encoderSettings = SPISettings(1e6, MSBFIRST, SPI_MODE3);
  MagneticSensorMT6835 encoder = MagneticSensorMT6835(CS, encoderSettings);
  
 -float target_velocity = 5;
-+float target_velocity = 0; // SIM-ARM: target angle [rad]
++#ifndef SIM_ZERO
++#define SIM_ZERO 3.14159f // SIM-ARM: the encoder angle at the arm's hang pose [rad]; the sim sets ENC_OFFSET_RAD to match
++#endif
++float target_velocity = SIM_ZERO; // SIM-ARM: target angle [rad]
  const float max_target_velocity = 25;
  float prevTime = 0.0;
  float currTime;
-@@ -134,7 +134,11 @@ void setup() {
+@@ -134,7 +137,11 @@ void setup() {
    motor.initFOC();
  
    // open loop control config
@@ -24,12 +27,12 @@ index d36029d0..23480b22 100644
  
    pinMode(LED_PIN, OUTPUT);
  
-@@ -192,7 +196,7 @@ void loop() {
+@@ -192,7 +199,7 @@ void loop() {
  
      if (HAL_FDCAN_GetRxMessage(&hfdcan2, FDCAN_RX_FIFO0, &RxHeader, RxData_C3) == HAL_OK) {
        target_velocity =
 -          max_target_velocity * (float)((RxData_C3[0] - '0') * 10 + (RxData_C3[1] - '0')) / 100.0f;
-+          3.14159f * (float)((RxData_C3[0] - '0') * 10 + (RxData_C3[1] - '0')) / 100.0f; // SIM-ARM: NN/100 * pi rad
++          SIM_ZERO + 3.14159f * (float)((RxData_C3[0] - '0') * 10 + (RxData_C3[1] - '0')) / 100.0f; // SIM-ARM: SIM_ZERO + NN/100 * pi rad
      }
    }
  

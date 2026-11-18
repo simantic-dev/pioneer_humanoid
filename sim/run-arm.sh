@@ -9,7 +9,8 @@ cd "$(dirname "$0")/.."
 : "${VENV:?set VENV to a venv with mujoco installed}"
 SP=$(ls -d "$VENV"/lib/python3.*/site-packages)
 mkdir -p sim/out
-PYTHONPATH=$SP "${SIM:-sim}" run --scenario sim/scenario-arm.yaml --usb-cdc-console dut.usb --timeout 11 --ascii \
+# ENC_OFFSET_RAD: the encoder reads pi at the hang pose, matching SIM_ZERO in sim/arm-position.patch
+ENC_OFFSET_RAD=3.14159 PYTHONPATH=$SP "${SIM:-sim}" run --scenario sim/scenario-arm.yaml --usb-cdc-console dut.usb --timeout 11 --ascii \
   --frames sim/out/arm-frames.txt --expect "Motor ready!!!" > sim/out/arm-uart.log 2> sim/out/arm-sim.log
 "$VENV/bin/python" sim/plot-arm.py | tee sim/out/arm-result.txt
 grep -q '^SETTLED' sim/out/arm-result.txt

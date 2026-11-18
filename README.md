@@ -29,12 +29,73 @@ picks it up on its next 100 ms poll.
 | Encoder | ours: reports MuJoCo's angle exactly, 21-bit, status always 0 |
 | Joint damping 0.01 N*m*s/rad; the 0.1 kg tip mass | our choices, sized so the stand-in motor can hold the arm |
 
-**What this run does not test.** The mechanism is one revolute joint carrying one link and a point-like mass: there is no kinematic chain,
-no inverse kinematics, no coupling between joints, no contact and no changing payload. The gravity torque on the hinge is simply
-`m g d sin(q)`, which the log reproduces (0.31 N*m at 1.885 rad against 0.306 N*m). The encoder has no noise and no
-mechanical lag, the motor has no friction, cogging or backlash, and there is no gearbox. The controller gains were chosen from ten
-settings tried on this same plant. Treat the result as evidence that the firmware's control code, the timer, SPI and CAN
-models and MuJoCo exchange data correctly in lockstep, and not as a statement about a real arm.
+**What the ideal run does not test.** The first run is the easy case: one revolute joint carrying one link and a point-like mass (no kinematic chain, no
+inverse kinematics, no joint coupling, no contact, no changing payload), an exact encoder, no friction and no gearbox. Its gravity torque is
+`m g d sin(q)`, which the log reproduces (0.31 N*m at 1.885 rad against 0.306 N*m). The controller gains were chosen from ten settings tried on
+this plant. The next section runs the same firmware against a worse arm and a worse sensor.
+
+## The same firmware against an imperfect arm and sensor
+
+![Twelve cases side by side: the same firmware binary on a MuJoCo arm and sensor that change from panel to panel](sim/screenshots/arm-cases.gif)
+
+One firmware binary (`sim/build/joint-arm.elf`) in every panel, on one virtual clock; the arm is MuJoCo's own render, the green ghost is the commanded
+angle, the trace under each arm is the true load angle. MP4: `sim/screenshots/arm-cases.mp4`. Each case is a full run of the firmware in `sim`
+(`sim/mujoco/run_cases.py`), 11 s of virtual time, scored from MuJoCo's true load angle and not from the (noisy) angle the firmware sees. Playback of
+captured runs; nothing is re-simulated for the GIF.
+
+| Case | Parameters (source) | Step 1: overshoot, settle | Step 2: overshoot, settle | Last 0.5 s of step 2: error, peak-to-peak |
+| --- | --- | --- | --- | --- |
+| Ideal | exact encoder, no friction, no backlash, 0.1 kg | -0.5%, 1.62 s | +1.2%, 0.53 s | +0.001, 0.001 rad |
+| AS5047P-class encoder | 14-bit, noise 0.068 deg rms, delay 110 us (datasheet (AS5047P, ams-OSRAM)) | +1.1%, 1.39 s | +2.8%, 2.20 s | -0.002, 0.036 rad |
+| Same encoder, zero at rest pose | as the previous panel, but the encoder's 0/2pi wrap sits at the arm's hang pose (setup, not a part (firmware built with ZERO0=1)) | ran one full turn the wrong way | one full turn off | -6.277, 0.034 rad |
+| Rough encoder | 12-bit, noise 0.3 deg rms, delay 5 ms (chosen) | +5.0%, never | +12.3%, never | -0.005, 0.118 rad |
+| Encoder lag | delay 20 ms, otherwise exact (chosen) | -0.4%, 1.52 s | +3.4%, 1.10 s | +0.002, 0.002 rad |
+| Joint friction | Coulomb 0.03 N*m (5% of the stand-in's 0.63 peak) + viscous 0.01 (chosen; Coulomb + viscous is MuJoCo's own model) | -0.6%, 1.68 s | +1.8%, 0.52 s | +0.015, 0.004 rad |
+| Payload 0.2 kg | tip mass 0.2 kg (gravity torque 0.59 N*m) (chosen) | -1.8%, 2.36 s | -81.1%, never | -0.825, 0.044 rad |
+| Backlash 15 arcmin | gap 0.25 deg, encoder on the motor, arm hangs (gravity preloads the gap) (catalogue: standard planetary 5-15 arcmin) | -0.8%, 1.71 s | +0.9%, 0.54 s | -0.002, 0.001 rad |
+| Combined | AS5047P-class encoder + friction + 15 arcmin gap + 0.15 kg (mix of the above) | +0.3%, 1.91 s | +4.1%, 1.36 s | -0.002, 0.009 rad |
+| Horizontal plane, ideal | no gravity on the joint (drawn from the side); exact encoder, no gap | +0.5%, 0.48 s | +0.5%, 0.50 s | +0.000, 0.000 rad |
+| Horizontal, 1 deg gap, encoder on motor | no gravity, gap 1 deg, encoder on the motor (chosen) | +1.3%, 0.45 s | +1.2%, 0.48 s | +0.009, 0.000 rad |
+| Horizontal, 1 deg gap, encoder on load | no gravity, gap 1 deg, encoder on the load (the gap is inside the loop) (chosen) | +0.5%, 0.48 s | +0.5%, 0.50 s | +0.000, 0.000 rad |
+
+*Settle* is the time after the command until the true angle stays within 0.02 rad of the target; "never" means it did not within the hold (about 2.5 s).
+*Overshoot* is relative to the step size. Noise is one fixed seed per case, so each noise row is one sample, not a statistic. In every case the firmware
+read the encoder about 8.1 thousand times per second (8,106 to 8,146 reads per second, counted from the SPI transactions), and the 100 ms CAN poll
+shows up as 0.06 to 0.21 s from the command frame to the first motion.
+
+**Where the numbers come from.**
+- *AS5047P-class encoder:* 14-bit, 0.068 deg rms (1 sigma) noise and about 110 us SPI propagation delay, from the AS5047P datasheet
+  ([Infineon/ams-OSRAM](https://www.infineon.com/row/public/documents/24/49/infineon-as5047p-datasheet-en.pdf); older revisions list these figures; I did not
+  check the current revision). The peer quantises to 14 bits, adds Gaussian noise and delays the angle by that many 40 us ticks before packing it into the
+  MT6835's 21-bit field. It stands in for a different sensor; the board's own encoder is the MT6835.
+- *Rough encoder and encoder lag:* chosen stress values, not a part.
+- *Friction:* Coulomb plus viscous, the model MuJoCo provides (`frictionloss`, `damping`), which simulators of servo actuators commonly use
+  ([Extended Friction Models for the Physics Simulation of Servo Actuators](https://arxiv.org/html/2410.08650v1)). The magnitudes are my choice (Coulomb at 5% of the stand-in motor's peak torque); I found no sourced values.
+- *Backlash:* the standard dead-zone model ([Nordin and Gutman, Automatica 38(10), 2002](https://doi.org/10.1016/S0005-1098(02)00047-X)), built as a MuJoCo fixed
+  tendon on (rotor angle - load angle) with a limited range of +-gap/2, so MuJoCo's own constraint solver stops the relative motion. `sim/mujoco/lash_check.py`
+  checks it with no firmware: the relative angle uses the whole gap (109% of a 0.25 deg gap, 102% of a 1 deg gap; the stops are soft). 15 arcmin is the top of the
+  5 to 15 arcmin range quoted for standard planetary gearboxes ([vendor and blog catalogues, order of magnitude](https://humanoid.guide/?p=16322)); there is no gearbox
+  here, the gap stands in for a coupling or spline. The stop stiffness (`solreflimit` time constant 2 ms) is a free parameter.
+- *Payload:* a heavier tip mass, chosen. Thermal effects are not modelled.
+
+**What the runs show** (each point is from the table or the logs in `sim/out/cases/`):
+1. **The firmware tolerates a datasheet-grade sensor.** With the AS5047P-class encoder it still reaches both targets (jitter 0.036 rad peak-to-peak at the hold), but step 2 takes 2.2 s to
+   settle against 0.5 s ideal.
+2. **A rough encoder (12-bit, 0.3 deg noise, 5 ms delay) never settles:** +12.3% overshoot and 0.118 rad (about 7 deg) of chatter at the hold. Likely the velocity loop
+   amplifying the encoder noise; I did not instrument the firmware to confirm that.
+3. **Encoder lag of 20 ms hardly matters** here: overshoot +3.4% on step 2. The arm's own swing period is 1.1 s. The firmware's start-up pole-pair check estimate moved from 7.88 to 8.40 (the motor has 7).
+4. **Coulomb friction leaves a steady offset** of +0.015 rad.
+5. **A 0.2 kg tip mass stalls on step 2** at 1.06 rad (error -0.825 rad): the stand-in motor tops out at 0.63 N*m. This is a limit of the stand-in motor, not a result about a real joint.
+6. **Backlash was nearly invisible on the hanging arm:** gravity keeps the gear face pressed (rotor minus load stays between -0.0026 and +0.0034 rad), so the gap never opens. With gravity off and a 1 deg gap, an encoder on the motor leaves the load resting
+   half a gap off (+0.009 rad; half the gap is 0.0087 rad), and an encoder on the load is indistinguishable from no gap. By my estimate the 2e-4 kg*m^2 rotor crosses the gap in about 3 ms at 0.6 N*m,
+   far too fast for this loop to hunt. A gearbox with a much heavier rotor, or less torque, would behave differently.
+7. **With the encoder's zero at the arm's rest pose, the same noise sends the arm a full turn the wrong way.** The 0/2pi wrap sits at the hang pose; when angle control starts (5.0 s) the
+   arm runs to -6.3 rad and ends 6.28 rad off target (the panel's trace leaves the chart). The render shows the arm at the ghost, because a full turn looks like the target. Consistent with the firmware's turn
+   counting flipping on noise at the wrap point; I did not trace that. The other cases put the zero at mid-range (see below), which avoids it.
+
+**How the cases are built.** `ARM=1 sh sim/build.sh` builds the position-control firmware with the encoder's hang-pose angle `SIM_ZERO` = pi, and the encoder peer adds the matching offset
+(`ENC_OFFSET_RAD`); `ARM=1 ZERO0=1 sh sim/build.sh` builds the wrap case's firmware with `SIM_ZERO` = 0. `VENV=<venv> python sim/mujoco/run_cases.py` runs all twelve (about 45 s each on a loaded
+laptop) and `python sim/mujoco/render_cases.py` makes the GIF. `sim/mujoco/cases.py` lists every parameter.
 
 ## This fork: the Pioneer joint board in a simulator
 
@@ -103,14 +164,14 @@ The GIF is a playback of the captured run's 10 ms samples (virtual time). The pl
 
 Measured with `sim` 0.10.4 (build cd27ee45), MuJoCo 4.0.1, 2026-11-18, `sim/run-arm.sh` (11 s virtual): after the firmware's
 sensor alignment (0.9 s to 5.0 s, `Motor ready!!!` at 5.036 s) the CAN master steps the target to 0.942 rad at 6.0 s and 1.885 rad at 8.5 s.
-Peak 0.938 rad (-0.5%) and 1.896 rad (+0.6%); mean error over the last 0.5 s of each hold -0.0074 and +0.0011 rad. The holding torque
+Peak 0.938 rad (-0.5% of the step) and 1.896 rad (+1.2% of the step); mean error over the last 0.5 s of each hold -0.0074 and +0.0011 rad. The holding torque
 at 1.885 rad is 0.31 N*m, MuJoCo's own m g d sin(q) for this arm is 0.306 N*m. Two runs gave byte-identical logs.
 
 **How to run it:** `ARM=1 sh sim/build.sh`, then `VENV=<venv with mujoco numpy matplotlib> sh sim/run-arm.sh`. The default build is unchanged.
 
 **What it changes and what is still ours:**
 - `sim/arm-position.patch` (applied by `ARM=1` only) switches the firmware from `velocity_openloop` to `MotionControlType::angle`
-  (P_angle 6, velocity PI 1.0 and 2), reads the two CAN digits as an angle of NN/100 pi rad and starts the target at 0. The ARM build also
+  (P_angle 6, velocity PI 1.0 and 2), reads the two CAN digits as `SIM_ZERO` + NN/100 pi rad and starts the target at `SIM_ZERO` (pi: the encoder peer adds `ENC_OFFSET_RAD` = pi, so the encoder reads pi at the hang pose and its 0/2pi wrap is out of the arm's travel; `sim/run-arm.sh` sets it). The ARM build also
   sets `HSE_VALUE=24000000U`, the NUCLEO crystal this scenario declares, so `millis()` is right (the default scenario's 5x-fast clock is
   described under "Clock" below). Ten gain settings were tried; the earlier ones rang, this is the one reported.
 - The motor's R, L, flux linkage and pole pairs are stand-ins (the repository does not name the motor), and the joint damping
